@@ -2,6 +2,7 @@ package springCouchbase;
 
 import com.couchbase.client.protocol.views.ComplexKey;
 import com.couchbase.client.protocol.views.Query;
+import com.couchbase.client.protocol.views.Stale;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -19,7 +20,7 @@ import java.util.List;
 import static org.junit.Assert.*;
 
 @RunWith(SpringJUnit4ClassRunner.class)
-@SpringApplicationConfiguration(classes = Application.class)
+@SpringApplicationConfiguration(classes = {CouchbaseTestConfig.class})
 @WebAppConfiguration
 public class ApplicationTests {
 
@@ -28,7 +29,7 @@ public class ApplicationTests {
 
     @After
     public void tearDown() throws Exception {
-
+        activityRepository.deleteAll();
     }
 
     @Before
@@ -52,6 +53,7 @@ public class ApplicationTests {
 
         Query query = new Query();
         query.setKey(ComplexKey.of("twitter"));
+        query.setStale(Stale.FALSE);
         List<Activity> activities = activityRepository.findByOrigin(query);
         assertNotNull(activities);
         assertFalse(activities.isEmpty());
