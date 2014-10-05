@@ -1,6 +1,7 @@
 package demo;
 
 import com.couchbase.client.protocol.views.Query;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.context.annotation.ComponentScan;
@@ -17,19 +18,28 @@ import java.util.List;
 @EnableAutoConfiguration
 public class Application extends AbstractCouchbaseConfiguration {
 
+    @Value("${couchbase.cluster.username}")
+    private String username;
+
+    @Value("${couchbase.cluster.password}")
+    private String password;
+
+    @Value("${couchbase.cluster.ip}")
+    private String ip;
+
     @Override
     protected List<String> bootstrapHosts() {
-        return Arrays.asList("127.0.0.1");
+        return Arrays.asList(ip);
     }
 
     @Override
     protected String getBucketName() {
-        return "default";
+        return this.username;
     }
 
     @Override
     protected String getBucketPassword() {
-        return "";
+        return this.password;
     }
 
     public static void main(String[] args) {

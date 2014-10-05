@@ -1,0 +1,3 @@
+[submodule "vagrants"]
+	path = vagrants
+	url = https://github.com/couchbaselabs/vagrants.git
