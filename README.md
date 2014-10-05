@@ -1,4 +1,4 @@
-spring-data-couchbase-talk
+Spring  Data Couchbase talk
 ==========================
 
 This is a demo showing the use of spring-data-couchbase.
