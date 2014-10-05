@@ -18,8 +18,8 @@ import java.util.List;
 @EnableAutoConfiguration
 public class Application extends AbstractCouchbaseConfiguration {
 
-    @Value("${couchbase.cluster.username}")
-    private String username;
+    @Value("${couchbase.cluster.bucket}")
+    private String bucketName;
 
     @Value("${couchbase.cluster.password}")
     private String password;
@@ -34,7 +34,7 @@ public class Application extends AbstractCouchbaseConfiguration {
 
     @Override
     protected String getBucketName() {
-        return this.username;
+        return this.bucketName;
     }
 
     @Override
@@ -57,7 +57,6 @@ class Activity {
     private String id;
     private String content;
     private String origin;
-
 
     public String getId() {
         return id;
