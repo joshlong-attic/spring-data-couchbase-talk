@@ -89,7 +89,8 @@ public class Application extends AbstractCouchbaseConfiguration {
         try {
             mapper.writeValue(stringWriter, o);
             return stringWriter.toString();
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
@@ -108,7 +109,7 @@ public class Application extends AbstractCouchbaseConfiguration {
                 couchbaseTemplate.insert(new Place(p));
              });
             Query q = new Query();
-            
+
             // low level query call
 //            couchbaseTemplate.findByView("place","all",q,Place.class);
 //            placeRepository.findAll().forEach(System.out::println);
