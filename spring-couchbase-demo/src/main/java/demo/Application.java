@@ -3,7 +3,7 @@ package demo;
 import com.couchbase.client.CouchbaseClient;
 import com.couchbase.client.protocol.views.Query;
 import com.couchbase.client.protocol.views.Stale;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.couchbase.client.protocol.views.ViewResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
@@ -31,8 +31,7 @@ import org.springframework.social.facebook.api.impl.FacebookTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 
-import java.io.IOException;
-import java.io.StringWriter;
+import javax.validation.constraints.NotNull;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -44,6 +43,10 @@ import java.util.stream.Collectors;
 @EnableScheduling
 @EnableCaching
 public class Application extends AbstractCouchbaseConfiguration {
+
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
 
     @Value("${couchbase.cluster.bucket}")
     private String bucketName;
@@ -77,23 +80,6 @@ public class Application extends AbstractCouchbaseConfiguration {
         return new FacebookTemplate(this.accessToken);
     }
 
-    @Bean
-    CouchbaseCacheManager cacheManager(CouchbaseClient couchbaseClient) throws Exception {
-        HashMap<String, CouchbaseClient> instances = new HashMap<>();
-        instances.put("places", couchbaseClient);
-        return new CouchbaseCacheManager(instances);
-    }
-
-    @Bean
-    LocalValidatorFactoryBean validator() {
-        return new LocalValidatorFactoryBean();
-    }
-
-    @Bean
-    ValidatingCouchbaseEventListener validationEventListener() {
-        return new ValidatingCouchbaseEventListener(validator());
-    }
-
 
     @Bean
     CommandLineRunner commandLineRunner(
@@ -116,39 +102,94 @@ public class Application extends AbstractCouchbaseConfiguration {
 
             placeRepository.findAll().forEach(System.out::println);
 
+            Place customPlace = new Place("849323");
+            placeRepository.save(customPlace);
         };
     }
 
-    public static void main(String[] args) {
-        SpringApplication.run(Application.class, args);
+    @Bean
+    CouchbaseCacheManager cacheManager(CouchbaseClient couchbaseClient) throws Exception {
+        HashMap<String, CouchbaseClient> instances = new HashMap<>();
+        instances.put("places", couchbaseClient);
+        return new CouchbaseCacheManager(instances);
     }
 
-    private String json(Object o) {
-        StringWriter stringWriter = new StringWriter();
-        ObjectMapper mapper = new ObjectMapper();
-        try {
-            mapper.writeValue(stringWriter, o);
-            return stringWriter.toString();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+    @Bean
+    LocalValidatorFactoryBean validator() {
+        return new LocalValidatorFactoryBean();
+    }
+
+    @Bean
+    ValidatingCouchbaseEventListener validationEventListener() {
+        return new ValidatingCouchbaseEventListener(validator());
     }
 }
+
+@Service
+class PlaceService {
+
+    private final Facebook facebook;
+    private final CouchbaseTemplate couchbaseTemplate;
+    private final PlaceRepository placeRepository;
+
+    @Scheduled(fixedDelay = 5000)
+    void janitor() {
+        ViewResponse viewResponse = couchbaseTemplate.queryView("place", "cacheEntries", new Query());
+        viewResponse.forEach(vr -> couchbaseTemplate.remove(vr.getId()));
+    }
+
+    @Autowired
+    PlaceService(Facebook facebook, CouchbaseTemplate couchbaseTemplate,
+                 PlaceRepository placeRepository) {
+        this.facebook = facebook;
+        this.couchbaseTemplate = couchbaseTemplate;
+        this.placeRepository = placeRepository;
+    }
+
+    public Collection<Place> findPlacesInsertedBefore(Date date) {
+        Query query = new Query();
+        query.setStale(Stale.FALSE);
+        query.setRangeEnd(Long.toString(date.getTime()));
+        return placeRepository.findByInsertionDate(query);
+    }
+
+    public Place loadPlace(String id) {
+        return this.placeRepository.findOne(id);
+    }
+
+    @Cacheable(value = "places", key = "'cache:'+#query")
+    public List<String> search(String query, double lat, double lon, int distance) {
+        return facebook.placesOperations()
+                .search(query, lat, lon, distance)
+                .stream()
+                .map(p -> this.placeRepository.save(new Place(p)))
+                .map(Place::getId)
+                .collect(Collectors.toList());
+    }
+}
+
+interface PlaceRepository extends CrudRepository<Place, String> {
+    Collection<Place> findByInsertionDate(Query query);
+}
+
 
 @Document(expiry = 0)
 class Place {
 
+    @Id
+    private String id;
+
     @Field
     private Location location;
 
+    @Field @NotNull
+    private String name;
+
     @Field
-    private String name, affilitation, category, description, about;
+    private String affilitation, category, description, about;
 
     @Field
     private Date insertionDate;
-
-    @Id
-    private String id;
 
     public String getName() {
         return name;
@@ -174,7 +215,11 @@ class Place {
         this.location = new Location(pageLocation);
     }
 
-    public Place() {
+    Place() {
+    }
+
+    public Place(String id) {
+        this.id = id;
     }
 
     @Override
@@ -207,52 +252,6 @@ class Place {
         return about;
     }
 }
-
-@Service
-class PlaceService {
-
-    private final Facebook facebook;
-    private final CouchbaseTemplate couchbaseTemplate;
-    private final PlaceRepository placeRepository;
-
-    @Scheduled(fixedDelay = 5000)
-    void janitor() {
-
-    }
-
-    @Autowired
-    PlaceService(Facebook facebook, CouchbaseTemplate couchbaseTemplate, PlaceRepository placeRepository) {
-        this.facebook = facebook;
-        this.couchbaseTemplate = couchbaseTemplate;
-        this.placeRepository = placeRepository;
-    }
-
-    public Collection<Place> findPlacesInsertedBefore(Date date) {
-        Query query = new Query();
-        query.setStale(Stale.FALSE);
-        query.setRangeEnd(Long.toString(date.getTime()));
-        return placeRepository.findByInsertionDate(query);
-    }
-
-    public Place loadPlace(String id) {
-        return this.placeRepository.findOne(id);
-    }
-
-    @Cacheable(value = "places", key = "'cache:'+#query")
-    public List<String> search(String query, double lat, double lon, int distance) {
-        return facebook.placesOperations()
-                .search(query, lat, lon, distance)
-                .stream()
-                .map(p -> this.placeRepository.save(new Place(p)))
-                .map(Place::getId)
-                .collect(Collectors.toList());
-    }
-}
-
-interface PlaceRepository extends CrudRepository<Place, String> {
-    Collection<Place> findByInsertionDate(Query query);
-}
-
 
 class Location {
     private String city;
