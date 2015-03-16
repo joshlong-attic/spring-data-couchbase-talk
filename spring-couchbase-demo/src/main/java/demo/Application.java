@@ -1,6 +1,9 @@
 package demo;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Date;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import javax.validation.constraints.NotNull;
@@ -10,12 +13,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.cache.annotation.Cacheable;
-import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.couchbase.cache.CouchbaseCacheManager;
 import org.springframework.data.couchbase.config.AbstractCouchbaseConfiguration;
 import org.springframework.data.couchbase.core.CouchbaseTemplate;
 import org.springframework.data.couchbase.core.mapping.Document;
@@ -24,25 +24,36 @@ import org.springframework.data.couchbase.core.mapping.event.ValidatingCouchbase
 import org.springframework.data.couchbase.repository.config.EnableCouchbaseRepositories;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.social.facebook.api.Facebook;
 import org.springframework.social.facebook.api.Page;
 import org.springframework.social.facebook.api.impl.FacebookTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 
-import com.couchbase.client.CouchbaseClient;
 import com.couchbase.client.protocol.views.Query;
-import com.couchbase.client.protocol.views.ViewResponse;
 
+/**
+ * @author Laurent Doguin
+ * @author Josh Long
+ */
 @SpringBootApplication
 @EnableScheduling
-@EnableCaching
 public class Application {
 
-    @EnableCouchbaseRepositories
+    @Bean
+    LocalValidatorFactoryBean validator() {
+        return new LocalValidatorFactoryBean();
+    }
+
+    @Bean
+    ValidatingCouchbaseEventListener validationEventListener() {
+        return new ValidatingCouchbaseEventListener(validator());
+    }
+
+	@EnableCouchbaseRepositories
 	@Configuration
 	static class CouchbaseConfiguration extends AbstractCouchbaseConfiguration {
+
 
 		@Value("${couchbase.cluster.bucket}")
 		private String bucketName;
@@ -83,43 +94,26 @@ public class Application {
 			PlaceService placeService) {
 		return args -> {
 
-			// couchbaseClient.flush().get();
+			Arrays.asList("Starbucks", "Philz Coffee").forEach(
+					query -> placeService.search(query, 37.752494, -122.414166, 5280));
 
-			String starbucks = "Starbucks";
-			String philzCoffee = "Philz Coffee";
-
-			// @formatter:off
-			Arrays.asList(starbucks, philzCoffee).forEach(
-					query -> placeService.search(query, 37.752494, -122.414166, 5280)
-							.stream().map(placeRepository::findOne)
-							.forEach(System.out::println));
-			// @formatter:on
-			System.out.println(String.format("there are %s results.",
-					placeRepository.count()));
-
+			System.out.println("------------------------");
+			System.out.println("query:findAll");
 			placeRepository.findAll().forEach(System.out::println);
 
-			Place customPlace = new Place("849323");
-			placeRepository.save(customPlace);
+			System.out.println("------------------------");
+			System.out.println("query:count");
+			System.out.println(placeRepository.count());
+
+			System.out.println("------------------------");
+			System.out.println("query:byName");
+			Query query = new Query();
+			query.setKey("Philz Coffee");
+			placeRepository.findByName(query).forEach(System.out::println);
+
 		};
 	}
 
-	@Bean
-	CouchbaseCacheManager cacheManager(CouchbaseClient couchbaseClient) throws Exception {
-		HashMap<String, CouchbaseClient> instances = new HashMap<>();
-		instances.put("places", couchbaseClient);
-		return new CouchbaseCacheManager(instances);
-	}
-
-	@Bean
-	LocalValidatorFactoryBean validator() {
-		return new LocalValidatorFactoryBean();
-	}
-
-	@Bean
-	ValidatingCouchbaseEventListener validationEventListener() {
-		return new ValidatingCouchbaseEventListener(validator());
-	}
 }
 
 @Service
@@ -129,13 +123,6 @@ class PlaceService {
 	private final CouchbaseTemplate couchbaseTemplate;
 	private final PlaceRepository placeRepository;
 
-	@Scheduled(fixedDelay = 5000)
-	void janitor() {
-		ViewResponse viewResponse = couchbaseTemplate.queryView("place", "cacheEntries",
-				new Query());
-		viewResponse.forEach(vr -> couchbaseTemplate.remove(vr.getId()));
-	}
-
 	@Autowired
 	PlaceService(Facebook facebook, CouchbaseTemplate couchbaseTemplate,
 			PlaceRepository placeRepository) {
@@ -144,7 +131,6 @@ class PlaceService {
 		this.placeRepository = placeRepository;
 	}
 
-	@Cacheable(value = "places", key = "'cache:'+#query")
 	public List<String> search(String query, double lat, double lon, int distance) {
 		return facebook.placesOperations().search(query, lat, lon, distance).stream()
 				.map(p -> this.placeRepository.save(new Place(p))).map(Place::getId)
@@ -153,7 +139,9 @@ class PlaceService {
 }
 
 interface PlaceRepository extends CrudRepository<Place, String> {
-	Collection<Place> findByInsertionDate(Query query);
+
+	// @View(designDocument = "place", viewName = "byName")
+	Collection<Place> findByName(Query placeNameQuery);
 }
 
 @Document(expiry = 0)
